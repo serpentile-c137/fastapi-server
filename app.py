@@ -9,6 +9,7 @@ from ultralytics import YOLO
 app = FastAPI()
 
 # Load YOLO model
+# model = YOLO("best.pt")
 model = YOLO("yolov8n_bench.pt")
 
 # Create folders
