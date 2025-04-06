@@ -1,16 +1,17 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 import shutil
 import os
 import cv2
 import numpy as np
 from ultralytics import YOLO
+import traceback
 
 app = FastAPI()
 
 # Load YOLO model
-# model = YOLO("best.pt")
-model = YOLO("yolov8n_bench.pt")
+model = YOLO("yolov8n_bench.pt")  # Replace with your own model path if needed
 
 # Create folders
 UPLOAD_FOLDER = "static/uploads"
@@ -18,43 +19,66 @@ RESULT_FOLDER = "static/results"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
+# Serve static files (MUST be before routes using it)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 @app.get("/")
 def home():
     return {"message": "Welcome to YOLO FastAPI Object Detection"}
 
 @app.post("/upload")
-async def upload_image(file: UploadFile = File(...)):
-    if file.content_type not in ["image/png", "image/jpeg"]:
-        raise HTTPException(status_code=400, detail="Invalid file type")
+async def upload_image(request: Request, file: UploadFile = File(...)):
+    try:
+        if file.content_type not in ["image/png", "image/jpeg"]:
+            raise HTTPException(status_code=400, detail="Invalid file type")
 
-    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-    result_image_path, occupied_count, empty_count = detect_objects(file_path)
+        result_image_path, occupied_count, empty_count = detect_objects(file_path)
 
-    return JSONResponse(content={
-        "filename": file.filename,
-        "result_image_url": result_image_path,
-        "occupied_count": occupied_count,
-        "empty_count": empty_count
-    })
+        # Generate proper external URL
+        base_url = str(request.base_url).rstrip("/")
+        relative_path = os.path.relpath(result_image_path, "static")
+        result_image_url = f"{base_url}/static/{relative_path}"
+
+        return JSONResponse(content={
+            "filename": file.filename,
+            "result_image_url": result_image_url,
+            "occupied_count": occupied_count,
+            "empty_count": empty_count
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 @app.post("/upload_video")
-async def upload_video(file: UploadFile = File(...)):
-    if file.content_type not in ["video/mp4", "video/avi", "video/quicktime"]:
-        raise HTTPException(status_code=400, detail="Invalid video file type. Only mp4, avi, and mov are allowed.")
+async def upload_video(request: Request, file: UploadFile = File(...)):
+    try:
+        if file.content_type not in ["video/mp4", "video/avi", "video/quicktime"]:
+            raise HTTPException(status_code=400, detail="Invalid video file type. Only mp4, avi, and mov are allowed.")
 
-    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-    result_video_path = detect_objects_in_video(file_path)
+        result_video_path = detect_objects_in_video(file_path)
 
-    return JSONResponse(content={
-        "filename": file.filename,
-        "result_video_url": result_video_path
-    })
+        # Generate proper external URL
+        base_url = str(request.base_url).rstrip("/")
+        relative_path = os.path.relpath(result_video_path, "static")
+        result_video_url = f"{base_url}/static/{relative_path}"
+
+        return JSONResponse(content={
+            "filename": file.filename,
+            "result_video_url": result_video_url
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 @app.get("/live")
 def live_video():
@@ -62,6 +86,9 @@ def live_video():
 
 def detect_objects(image_path):
     img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError("cv2.imread() failed to load the image")
+
     results = model.predict(source=img)
     annotated_image = results[0].plot()
     result_image_path = os.path.join(RESULT_FOLDER, "result_" + os.path.basename(image_path))
@@ -156,4 +183,4 @@ def gen_frames():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=7860)
