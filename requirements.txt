@@ -1,4 +1,8 @@
 uvicorn
+gunicorn
 fastapi
 ultralytics
 python-multipart
+requests
+numpy
+opencv-python
